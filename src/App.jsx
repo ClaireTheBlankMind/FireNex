@@ -1,7 +1,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./lib/supabase.js";
-import { initDB, saveDataToTable, getDataFromTable } from "./lib/db.js"; // NEW
+import {
+  initDB,
+  saveDataToTable,
+  getDataFromTable,
+  addToSyncQueue,
+  getSyncQueue,
+  removeFromSyncQueue,
+} from "./lib/db.js";
 
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -37,255 +44,442 @@ export default function App({ profile, onSignOut }) {
   const [dispatchNotice, setDispatchNotice] = useState("");
 
   // Load the latest IoT reading for each sensor.
-      const fetchSensorReadings = useCallback(async () => {
-    setSensorLoading(true);
-    setSensorError("");
+    
+const fetchSensorReadings = useCallback(async () => {
+  setSensorLoading(true);
+  setSensorError("");
+
+  try {
+    // First, try to retrieve the latest sensor readings from Supabase.
+    const { data, error } = await supabase
+      .from("sensor_readings")
+      .select(
+        "id, sensor_id, smoke_level, temperature_c, alert_status, latitude, longitude, recorded_at"
+      )
+      .order("recorded_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Keep only the latest reading for each sensor.
+    const latestBySensor = new Map();
+
+    for (const reading of data ?? []) {
+      if (!latestBySensor.has(reading.sensor_id)) {
+        latestBySensor.set(reading.sensor_id, {
+          id: reading.sensor_id,
+          sensor_id: reading.sensor_id,
+          barangay: "",
+          smoke: reading.smoke_level,
+          temperature: reading.temperature_c,
+          status: reading.alert_status,
+          latitude: reading.latitude,
+          longitude: reading.longitude,
+          lastUpdate: reading.recorded_at,
+        });
+      }
+    }
+
+    const sensorArray = Array.from(latestBySensor.values());
+
+    // Display the latest server data.
+    setSensors(sensorArray);
+
+    // Save the successful server response to IndexedDB.
+    await saveDataToTable("sensors", sensorArray);
+
+    console.log(
+      "Loaded IoT sensors from Supabase:",
+      sensorArray.length
+    );
+
+  } catch (error) {
+    console.warn(
+      "Supabase sensor request failed. Loading IndexedDB cache:",
+      error.message
+    );
 
     try {
-      // ALWAYS try to fetch from Supabase first (assume online)
-      const { data, error } = await supabase
-        .from("sensor_readings")
-        .select(
-          "id, sensor_id, smoke_level, temperature_c, alert_status, latitude, longitude, recorded_at"
-        )
-        .order("recorded_at", { ascending: false });
+      // IndexedDB retrieval is asynchronous.
+      const cachedSensors = await getDataFromTable("sensors");
 
-      // If we got a network error, this line triggers the catch block below
-      if (error) throw error;
-
-      const latestBySensor = new Map();
-      for (const reading of data ?? []) {
-        if (!latestBySensor.has(reading.sensor_id)) {
-          latestBySensor.set(reading.sensor_id, {
-            id: reading.sensor_id,
-            sensor_id: reading.sensor_id,
-            barangay: "",
-            smoke: reading.smoke_level,
-            temperature: reading.temperature_c,
-            status: reading.alert_status,
-            latitude: reading.latitude,
-            longitude: reading.longitude,
-            lastUpdate: reading.recorded_at,
-          });
-        }
-      }
-
-      const sensorArray = Array.from(latestBySensor.values());
-      setSensors(sensorArray);
-      
-      // Save to SQLite (ONLY if success)
-      saveDataToTable('sensors', sensorArray);
-      console.log("Loaded IoT sensors from Supabase:", latestBySensor.size);
-
-    } catch (error) {
-      // If the request failed, fall back to local cache
-      console.log("Supabase fetch failed. Falling back to SQLite cache.", error.message);
-      const cachedSensors = getDataFromTable('sensors');
-      
       if (cachedSensors.length > 0) {
         setSensors(cachedSensors);
-        console.log("Loaded IoT sensors from SQLite cache:", cachedSensors.length);
+        console.log(
+          "Loaded IoT sensors from IndexedDB:",
+          cachedSensors.length
+        );
       } else {
-        setSensorError("You are offline and no sensor data has been cached yet.");
+        setSensorError(
+          "No internet connection and no cached sensor data is available."
+        );
       }
-    } finally {
-      setSensorLoading(false);
+    } catch (cacheError) {
+      console.error("Failed to load sensor cache:", cacheError);
+
+      setSensorError("Unable to load cached sensor data.");
     }
-  }, []);
+  } finally {
+    setSensorLoading(false);
+  }
+}, []);
 
   // Save new incidents directly to Supabase.
-  const saveIncidentToSupabase = useCallback(async (incident) => {
+  
+const saveIncidentToSupabase = useCallback(async (incident) => {
+  // Prepare the data that will eventually be inserted into Supabase.
+  const incidentPayload = {
+    reference_no: incident.reference_no,
+    description:
+      incident.description ||
+      incident.title ||
+      "Fire emergency",
+    barangay: incident.barangay || null,
+    priority: incident.priority || "Medium",
+    status: "Reported",
+    reporter_name: incident.reporter_name || null,
+    contact_number: incident.contact_number || null,
+    address: incident.address || incident.location || null,
+    latitude: incident.latitude ?? null,
+    longitude: incident.longitude ?? null,
+  };
 
-        // OFFLINE FALLBACK
-    if (!navigator.onLine) {
-      console.log("Offline: Saving incident to local SQLite.");
-      const localIncident = {
-        ...incident,
-        id: `local_${Date.now()}`,
-        dbId: `local_${Date.now()}`,
-        created_at: new Date().toISOString(),
-        status: "Reported",
-        is_synced: false // We will use this later to sync
-      };
-      
-      // Get current local incidents, add the new one, and save
-      const current = getDataFromTable('incidents');
-      saveDataToTable('incidents', [localIncident, ...current]);
-      
-      // Update UI
-      setIncidents(prev => [localIncident, ...prev]);
-      
-      return localIncident;
-    }
+  // Save an incident locally and add it to the synchronization queue.
+  const saveLocally = async () => {
+    const localId = `local_${crypto.randomUUID()}`;
 
+    const localIncident = {
+      ...incident,
+      ...incidentPayload,
+      id: localId,
+      dbId: localId,
+      databaseId: null,
+      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      status: "Reported",
+      is_synced: false,
+      sync_status: "pending",
+    };
+
+    // Preserve existing cached incidents.
+    const current = await getDataFromTable("incidents");
+
+    await saveDataToTable("incidents", [
+      localIncident,
+      ...current,
+    ]);
+
+    // Add the upload operation to the persistent sync queue.
+    await addToSyncQueue({
+      action: "insert",
+      table: "incidents",
+      local_record_id: localId,
+      payload: incidentPayload,
+    });
+
+    // Update the application immediately.
+    setIncidents((prev) => [
+      localIncident,
+      ...prev.filter(
+        (item) => String(item.id) !== String(localId)
+      ),
+    ]);
+
+    console.log("Incident saved locally and added to sync queue:", localId);
+
+    return localIncident;
+  };
+
+  // If the device is already offline, save locally.
+  if (!navigator.onLine) {
+    console.log("Device offline. Saving incident to IndexedDB.");
+    return await saveLocally();
+  }
+
+  try {
+    // Attempt to save directly to Supabase.
     const { data, error } = await supabase
       .from("incidents")
-      .insert({
-        reference_no: incident.reference_no,
-        description:
-          incident.description ||
-          incident.title ||
-          "Fire emergency",
-        barangay: incident.barangay || null,
-        priority: incident.priority || "Medium",
-        status: "Reported",
-        reporter_name: incident.reporter_name || null,
-        contact_number: incident.contact_number || null,
-        address: incident.address || incident.location || null,
-        latitude: incident.latitude ?? null,
-        longitude: incident.longitude ?? null,
-      })
+      .insert(incidentPayload)
       .select("*")
       .single();
 
     if (error) {
-      console.error("Failed to save incident:", error);
+      console.error("Supabase rejected incident:", error);
       throw error;
     }
 
-    return data;
-  }, []);
+    console.log("Incident successfully saved to Supabase:", data.id);
+
+    return {
+      ...data,
+      dbId: data.id,
+      databaseId: data.id,
+      is_synced: true,
+      sync_status: "synced",
+    };
+
+  } catch (error) {
+    // Only queue network-related failures.
+    // Do not silently queue permission, validation, or database errors.
+    const isNetworkFailure =
+      !navigator.onLine ||
+      error instanceof TypeError ||
+      error?.name === "AbortError" ||
+      error?.message?.toLowerCase().includes("fetch");
+
+    if (isNetworkFailure) {
+      console.warn(
+        "Supabase is unreachable. Saving incident for later synchronization:",
+        error.message
+      );
+
+      return await saveLocally();
+    }
+
+    console.error("Failed to save incident to Supabase:", error);
+    throw error;
+  }
+}, []);
 
   // Load incidents and response units directly from Supabase.
-      const fetchDispatchData = useCallback(async () => {
-    setDispatchLoading(true);
-    setDispatchError("");
-    setDispatchNotice("");
+     
+const fetchDispatchData = useCallback(async () => {
+  setDispatchLoading(true);
+  setDispatchError("");
+  setDispatchNotice("");
 
-    try {
-      const [incidentResult, unitResult] = await Promise.all([
-        supabase
-          .from("incidents")
-          .select("*")
-          .order("created_at", { ascending: false }),
+  try {
+    // Retrieve the latest data from Supabase.
+    const [incidentResult, unitResult] = await Promise.all([
+      supabase
+        .from("incidents")
+        .select("*")
+        .order("created_at", { ascending: false }),
 
-        supabase
-          .from("response_units")
-          .select(
-            "id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at"
+      supabase
+        .from("response_units")
+        .select(
+          "id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at"
+        )
+        .order("created_at", { ascending: true }),
+    ]);
+
+    if (incidentResult.error) {
+      throw new Error(
+        `Could not load incidents: ${incidentResult.error.message}`
+      );
+    }
+
+    if (unitResult.error) {
+      throw new Error(
+        `Could not load response units: ${unitResult.error.message}`
+      );
+    }
+
+    const incidentRows = incidentResult.data ?? [];
+    const unitRows = unitResult.data ?? [];
+
+    // Read existing local incidents before updating the cache.
+    const cachedIncidents = await getDataFromTable("incidents");
+
+    // Preserve incidents created offline that haven't synchronized.
+    const pendingLocalIncidents = cachedIncidents.filter(
+      (incident) => incident.is_synced === false
+    );
+
+    const mappedIncidents = incidentRows.map((row) => ({
+      ...row,
+      id: row.id,
+      dbId: row.id,
+      databaseId: row.id,
+      title:
+        row.description?.split("\n")[0] ||
+        row.reference_no ||
+        "Fire emergency",
+      description: row.description || "Fire emergency",
+      reference_no: row.reference_no || "",
+      barangay: row.barangay || "",
+      address: row.address || "",
+      location: row.address || row.barangay || "Location unavailable",
+      latitude:
+        row.latitude == null ? null : Number(row.latitude),
+      longitude:
+        row.longitude == null ? null : Number(row.longitude),
+      lat: row.latitude == null ? null : Number(row.latitude),
+      lng: row.longitude == null ? null : Number(row.longitude),
+      assignedUnit: row.assigned_unit_id || "",
+      assigned_unit_id: row.assigned_unit_id || null,
+      status: row.status || "Reported",
+      priority: row.priority || "Medium",
+      reportedAt: row.created_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      is_synced: true,
+    }));
+
+    // Combine server incidents with unsynchronized local incidents.
+    // Use IDs to avoid duplicate records.
+    const combinedIncidents = [
+      ...pendingLocalIncidents,
+      ...mappedIncidents,
+    ];
+
+    const uniqueIncidents = Array.from(
+      new Map(
+        combinedIncidents.map((incident) => [
+          String(incident.id),
+          incident,
+        ])
+      ).values()
+    );
+
+    const mappedUnits = unitRows.map((row) => {
+      const assignedIncident = uniqueIncidents.find(
+        (incident) =>
+          String(incident.assigned_unit_id || "") === String(row.id) &&
+          !["Resolved", "Completed", "Cancelled"].includes(
+            String(incident.status)
           )
-          .order("created_at", { ascending: true }),
-      ]);
+      );
 
-      // If Supabase threw an error, we throw it to the catch block
-      if (incidentResult.error) throw new Error(`Could not load incidents: ${incidentResult.error.message}`);
-      if (unitResult.error) throw new Error(`Could not load response units: ${unitResult.error.message}`);
-
-      const incidentRows = incidentResult.data ?? [];
-      const unitRows = unitResult.data ?? [];
-
-      const mappedIncidents = incidentRows.map((row) => ({
+      return {
         ...row,
         id: row.id,
-        dbId: row.id,
-        databaseId: row.id,
-        title: row.description?.split("\n")[0] || row.reference_no || "Fire emergency",
-        description: row.description || "Fire emergency",
-        reference_no: row.reference_no || "",
-        barangay: row.barangay || "",
-        address: row.address || "",
-        location: row.address || row.barangay || "Location unavailable",
-        latitude: row.latitude == null ? null : Number(row.latitude),
-        longitude: row.longitude == null ? null : Number(row.longitude),
+        name: row.unit_name || "Unnamed Unit",
+        type: row.vehicle_type || "Response Unit",
+        status: row.status || "Available",
+        active: row.active ?? true,
         lat: row.latitude == null ? null : Number(row.latitude),
         lng: row.longitude == null ? null : Number(row.longitude),
-        assignedUnit: row.assigned_unit_id || "",
-        assigned_unit_id: row.assigned_unit_id || null,
-        status: row.status || "Reported",
-        priority: row.priority || "Medium",
-        reportedAt: row.created_at,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+        latitude: row.latitude == null ? null : Number(row.latitude),
+        longitude: row.longitude == null ? null : Number(row.longitude),
+        last_location_at: row.last_location_at || null,
+        assignedIncident: assignedIncident?.id || "",
+      };
+    });
 
-      const mappedUnits = unitRows.map((row) => {
-        const assignedIncident = mappedIncidents.find(
-          (incident) =>
-            String(incident.assigned_unit_id || "") === String(row.id) &&
-            !["Resolved", "Completed", "Cancelled"].includes(String(incident.status))
-        );
+    // Update the application.
+    setIncidents(uniqueIncidents);
+    setUnits(mappedUnits);
 
-        return {
-          ...row,
-          id: row.id,
-          name: row.unit_name || "Unnamed Unit",
-          type: row.vehicle_type || "Response Unit",
-          status: row.status || "Available",
-          active: row.active ?? true,
-          lat: row.latitude == null ? null : Number(row.latitude),
-          lng: row.longitude == null ? null : Number(row.longitude),
-          latitude: row.latitude == null ? null : Number(row.latitude),
-          longitude: row.longitude == null ? null : Number(row.longitude),
-          last_location_at: row.last_location_at || null,
-          assignedIncident: assignedIncident?.id || "",
-        };
-      });
+    // Save the combined incidents and latest units to IndexedDB.
+    await Promise.all([
+      saveDataToTable("incidents", uniqueIncidents),
+      saveDataToTable("units", mappedUnits),
+    ]);
 
-      setIncidents(mappedIncidents);
-      setUnits(mappedUnits);
-      
-      // Save to SQLite (ONLY if success)
-      saveDataToTable('incidents', mappedIncidents);
-      saveDataToTable('units', mappedUnits);
-      
-      console.log("Supabase dispatch data loaded and cached to SQLite.");
+    console.log(
+      "Supabase dispatch data loaded and cached to IndexedDB."
+    );
 
-    } catch (error) {
-      // If the request failed, fall back to local cache
-      console.log("Supabase fetch failed. Falling back to SQLite cache.", error.message);
-      
-      const cachedIncidents = getDataFromTable('incidents');
-      const cachedUnits = getDataFromTable('units');
-      
+    console.log(
+      `Loaded ${mappedIncidents.length} server incidents and preserved ${pendingLocalIncidents.length} pending local incidents.`
+    );
+
+  } catch (error) {
+    console.warn(
+      "Supabase dispatch request failed. Loading IndexedDB cache:",
+      error.message
+    );
+
+    try {
+      // IndexedDB retrieval is asynchronous.
+      const [cachedIncidents, cachedUnits] = await Promise.all([
+        getDataFromTable("incidents"),
+        getDataFromTable("units"),
+      ]);
+
       if (cachedIncidents.length > 0 || cachedUnits.length > 0) {
         setIncidents(cachedIncidents);
         setUnits(cachedUnits);
-        console.log(`Loaded ${cachedIncidents.length} incidents and ${cachedUnits.length} units from SQLite cache.`);
+
+        console.log(
+          `Loaded ${cachedIncidents.length} incidents and ${cachedUnits.length} units from IndexedDB.`
+        );
       } else {
-        setDispatchError("You are offline and no dispatch data has been cached yet.");
+        setDispatchError(
+          "No internet connection and no cached dispatch data is available."
+        );
       }
-    } finally {
-      setDispatchLoading(false);
+    } catch (cacheError) {
+      console.error(
+        "Failed to load dispatch data from IndexedDB:",
+        cacheError
+      );
+
+      setDispatchError("Unable to load cached dispatch data.");
     }
-  }, []);
+  } finally {
+    setDispatchLoading(false);
+  }
+}, []);
 
-  // Initialize the application and load online data.
-  useEffect(() => {
-    let cancelled = false;
+  
+// Initialize IndexedDB and load application data.
+useEffect(() => {
+  let cancelled = false;
 
-    async function initializeApp() {
-      try {
-        await initDB();
-        console.log("SQLite DB ready.");
-      } catch (err) {
-        console.warn("SQLite unavailable — offline data caching disabled for this session.", err);
-      }
-      
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        if (!cancelled) {
-          console.log("Supabase client is responding.");
-          console.log("User logged in:", Boolean(data.session?.user));
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error("Supabase connection check failed:", error.message);
-        }
-      }
+  async function initializeApp() {
+    try {
+      // Initialize local offline storage first.
+      await initDB();
+
+      if (cancelled) return;
+
+      console.log("FireNex IndexedDB is ready.");
+
+    } catch (error) {
+      console.error(
+        "FireNex IndexedDB initialization failed:",
+        error
+      );
 
       if (!cancelled) {
-        // This will now check navigator.onLine and use SQLite if needed
-        await Promise.all([fetchSensorReadings(), fetchDispatchData()]);
+        setSensorError("Local sensor storage is unavailable.");
+        setDispatchError("Local dispatch storage is unavailable.");
+      }
+
+      return;
+    }
+
+    try {
+      // Check the Supabase authentication session.
+      const { data, error } = await supabase.auth.getSession();
+
+      if (error) throw error;
+
+      if (!cancelled) {
+        console.log("Supabase connection check completed.");
+        console.log(
+          "User logged in:",
+          Boolean(data.session?.user)
+        );
+      }
+
+    } catch (error) {
+      if (!cancelled) {
+        console.warn(
+          "Supabase connection check failed:",
+          error.message
+        );
       }
     }
 
-    initializeApp();
+    if (!cancelled) {
+      // Load server data or fall back to IndexedDB.
+      await Promise.all([
+        fetchSensorReadings(),
+        fetchDispatchData(),
+      ]);
+    }
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchSensorReadings, fetchDispatchData]);
+  initializeApp();
+
+  return () => {
+    cancelled = true;
+  };
+}, [fetchSensorReadings, fetchDispatchData]);
 
   // Automatically refresh incidents when Supabase records change.
   useEffect(() => {

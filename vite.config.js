@@ -21,19 +21,16 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,geojson}'],
+        // ⭐ Added "wasm" so the binary is precached automatically.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,geojson,wasm}'],
+        // sql-wasm.wasm is ~1.2 MB; keep the 10 MB cap for safety.
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         clientsClaim: true,
         skipWaiting: true,
         cleanupOutdatedCaches: true,
-        // ⭐ Precache the public WASM and JS glue explicitly
-        additionalManifestEntries: [
-          { url: '/sql-wasm.js', revision: null },
-          { url: '/sql-wasm.wasm', revision: null },
-        ],
       }
     })
   ],
-  // NEW: Ensure the wasm file is not inlined and is handled as an asset
+  // Ensure Vite treats .wasm as an asset (fine to keep).
   assetsInclude: ['**/*.wasm'],
 })

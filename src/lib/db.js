@@ -1,116 +1,163 @@
 
-let db = null;
-let initPromise = null;
+const DB_NAME = "firenex_offline";
+const DB_VERSION = 1;
 
-export async function initDB() {
-  if (db) return db;
-  if (initPromise) return initPromise;
+const TABLES = ["sensors", "incidents", "units", "sync_queue"];
 
-  initPromise = (async () => {
-    try {
-      // Wait for WASM loader to be available
-      if (!window.initSqlJs) {
-        throw new Error(
-          "initSqlJs not loaded — check that /sql-wasm.js was loaded via script tag"
-        );
+let dbPromise = null;
+
+export function initDB() {
+  if (dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB is not supported by this browser."));
+      dbPromise = null;
+      return;
+    }
+
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const database = event.target.result;
+
+      TABLES.forEach((table) => {
+        if (!database.objectStoreNames.contains(table)) {
+          database.createObjectStore(table, {
+            keyPath: "id",
+          });
+        }
+      });
+    };
+
+    request.onsuccess = () => {
+      const database = request.result;
+
+      database.onversionchange = () => {
+        database.close();
+        dbPromise = null;
+      };
+
+      resolve(database);
+    };
+
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
+
+    request.onblocked = () => {
+      console.warn("FireNex database upgrade is blocked by another tab.");
+    };
+  });
+
+  return dbPromise;
+}
+
+export async function getDB() {
+  return initDB();
+}
+
+export async function closeDB() {
+  if (!dbPromise) return;
+
+  try {
+    const database = await dbPromise;
+    database.close();
+  } finally {
+    dbPromise = null;
+  }
+}
+
+function validateTable(tableName) {
+  if (!TABLES.includes(tableName)) {
+    throw new Error(`Invalid FireNex storage table: ${tableName}`);
+  }
+}
+
+export async function saveDataToTable(tableName, dataArray) {
+  validateTable(tableName);
+
+  const database = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(tableName, "readwrite");
+    const store = transaction.objectStore(tableName);
+
+    store.clear();
+
+    (dataArray || []).forEach((item) => {
+      const id = item.id ?? item.sensor_id ?? item.dbId;
+
+      if (id == null) {
+        console.warn("Skipped record without an ID:", item);
+        return;
       }
 
-      // Point to the local .wasm file (bundled with your app).
-      // Do NOT rely on a CDN — that's what causes ERR_INTERNET_DISCONNECTED.
-      const SQL = await window.initSqlJs({
-        locateFile: (file) => {
-          // Resolve relative to the current page/app base URL
-          const base = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "/";
-          return `${base.replace(/\/$/, "")}/${file}`;
-        },
+      store.put({
+        ...item,
+        id: String(id),
       });
+    });
 
-      db = new SQL.Database();
-      return db;
-    } catch (error) {
-      console.error("Failed to initialize SQLite DB:", error);
-      initPromise = null; // allow retry
-      db = null;
-      throw error;
-    }
-  })();
+    transaction.oncomplete = () => {
+      resolve(true);
+    };
 
-  return initPromise;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
 }
 
-export function getDB() {
-  if (!db) throw new Error("DB not initialized — call initDB() first");
-  return db;
+export async function getDataFromTable(tableName) {
+  validateTable(tableName);
+
+  const database = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(tableName, "readonly");
+    const request = transaction.objectStore(tableName).getAll();
+
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
 }
 
-export function closeDB() {
-  if (db) {
-    db.close();
-    db = null;
-  }
-  initPromise = null;
+// Add an offline operation without deleting existing pending operations.
+export async function addToSyncQueue(operation) {
+  const database = await initDB();
+
+  const id = operation.id || crypto.randomUUID();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("sync_queue", "readwrite");
+
+    transaction.objectStore("sync_queue").put({
+      ...operation,
+      id,
+      created_at: new Date().toISOString(),
+      status: "pending",
+    });
+
+    transaction.oncomplete = () => resolve(id);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
 }
 
-export function saveDB() {
-  if (!db) return;
-  try {
-    const data = db.export();
-    const array = Array.from(data);
-    localStorage.setItem('firenex_db', JSON.stringify(array));
-  } catch (err) {
-    console.error('Failed to save DB to localStorage:', err);
-  }
+export async function getSyncQueue() {
+  return getDataFromTable("sync_queue");
 }
 
-export function saveDataToTable(tableName, dataArray) {
-  if (!db) {
-    console.warn(`Cannot save to ${tableName}: DB not initialized.`);
-    return;
-  }
+export async function removeFromSyncQueue(id) {
+  const database = await initDB();
 
-  try {
-    db.run(`DELETE FROM ${tableName}`);
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("sync_queue", "readwrite");
 
-    if (dataArray && dataArray.length > 0) {
-      const stmt = db.prepare(
-        `INSERT INTO ${tableName} (id, data) VALUES (?, ?)`
-      );
-      dataArray.forEach((item) => {
-        const id =
-          item.id || item.sensor_id || item.dbId || `gen_${Math.random()}`;
-        stmt.run([String(id), JSON.stringify(item)]);
-      });
-      stmt.free();
-    }
+    transaction.objectStore("sync_queue").delete(String(id));
 
-    saveDB();
-    console.log(`Saved ${dataArray?.length || 0} records to ${tableName}.`);
-  } catch (err) {
-    console.error(`Failed to save data to ${tableName}:`, err);
-  }
-}
-
-export function getDataFromTable(tableName) {
-  if (!db) {
-    console.warn(`Cannot read from ${tableName}: DB not initialized.`);
-    return [];
-  }
-
-  try {
-    const stmt = db.prepare(`SELECT data FROM ${tableName}`);
-    const results = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      try {
-        results.push(JSON.parse(row.data));
-      } catch (parseErr) {
-        console.warn('Skipped invalid JSON row:', parseErr);
-      }
-    }
-    stmt.free();
-    return results;
-  } catch (err) {
-    console.error(`Failed to read from ${tableName}:`, err);
-    return [];
-  }
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error);
+  });
 }

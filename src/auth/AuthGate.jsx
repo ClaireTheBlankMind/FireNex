@@ -1,3 +1,327 @@
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase.js";
+import App from "../App.jsx";
+
+function LoginForm() {
+  const [view, setView] = useState("login");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  function changeView(nextView) {
+    setView(nextView);
+    setError("");
+    setNotice("");
+    setPassword("");
+    setShowPassword(false);
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setSubmitting(true);
+
+    try {
+      if (view === "login") {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) {
+          setError(error.message);
+          return;
+        }
+
+        // Record the successful login.
+        const { error: logError } = await supabase.rpc("log_successful_login");
+        if (logError) {
+          console.error("Failed to record login:", logError);
+        }
+      } else if (view === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+            },
+          },
+        });
+
+        if (error) throw error;
+
+        if (data.session) {
+          const { error: signOutError } = await supabase.auth.signOut();
+          if (signOutError) {
+            throw signOutError;
+          }
+        }
+
+        setNotice(
+          data.session
+            ? "Registration submitted. Please wait for Superadmin approval before signing in."
+            : "Registration successful. Confirm your email if requested, then wait for Superadmin approval."
+        );
+
+        setPassword("");
+        setView("login");
+      } else if (view === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(
+          email.trim(),
+          {
+            redirectTo: window.location.origin,
+          }
+        );
+
+        if (error) throw error;
+
+        setNotice(
+          "If an account exists for this email, a password-reset link will be sent. Please check your inbox and spam folder."
+        );
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const isLogin = view === "login";
+  const isSignup = view === "signup";
+  const isForgot = view === "forgot";
+
+  return (
+    <main className="sos-auth-page">
+      <section className="sos-auth-card">
+        <div className="sos-auth-icon">
+          <img src="/images/FireNex Fire-Logo.png" alt="FireNex Logo" />
+        </div>
+
+        <p className="sos-auth-eyebrow">BUREAU OF FIRE PROTECTION</p>
+
+        <p className="sos-auth-subtitle">
+          {isLogin
+            ? "Fire Detection, Dispatch & Response Monitoring System"
+            : isSignup
+            ? "Request authorized access to the FireNex platform"
+            : "Receive a secure link to reset your password"}
+        </p>
+
+        <form onSubmit={handleSubmit}>
+          {isSignup && (
+            <>
+              <label htmlFor="sos-full-name">Full name</label>
+              <input
+                id="sos-full-name"
+                type="text"
+                autoComplete="name"
+                placeholder="Enter your full name"
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                required
+              />
+            </>
+          )}
+
+          <label htmlFor="sos-email">Email address</label>
+          <input
+            id="sos-email"
+            type="email"
+            autoComplete="email"
+            placeholder="Enter your email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+          />
+
+          {(isLogin || isSignup) && (
+            <>
+              <label htmlFor="sos-password">Password</label>
+              <div className="sos-password-wrapper">
+                <input
+                  id="sos-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={isLogin ? "current-password" : "new-password"}
+                  placeholder={isSignup ? "Create a password" : "Enter your password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  minLength={6}
+                  required
+                />
+                <button
+                  className="sos-password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((previous) => !previous)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {error && (
+            <p className="sos-auth-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          {notice && (
+            <p className="sos-auth-notice" role="status">
+              {notice}
+            </p>
+          )}
+
+          <button className="sos-auth-button" type="submit" disabled={submitting}>
+            {submitting
+              ? "Please wait..."
+              : isLogin
+              ? "Sign in securely"
+              : isSignup
+              ? "Request account"
+              : "Send reset link"}
+          </button>
+        </form>
+
+        <div className="sos-auth-links">
+          {isLogin && (
+            <>
+              <button
+                type="button"
+                className="sos-auth-link"
+                onClick={() => changeView("forgot")}
+              >
+                Forgot password?
+              </button>
+              <p>
+                Need an account?{" "}
+                <button
+                  type="button"
+                  className="sos-auth-link"
+                  onClick={() => changeView("signup")}
+                >
+                  Create account
+                </button>
+              </p>
+            </>
+          )}
+
+          {!isLogin && (
+            <button
+              type="button"
+              className="sos-auth-link"
+              onClick={() => changeView("login")}
+            >
+              Back to sign in
+            </button>
+          )}
+        </div>
+
+        <p className="sos-auth-footer">
+          Authorized BFP personnel only. Account activation is subject to administrator approval.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function ResetPasswordForm({ onComplete }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleReset(event) {
+    event.preventDefault();
+    setError("");
+
+    if (password !== confirmPassword) {
+      setError("The passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+
+      await supabase.auth.signOut();
+      onComplete();
+    } catch (err) {
+      setError(err.message || "Unable to update your password. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="sos-auth-page">
+      <section className="sos-auth-card">
+        <div className="sos-auth-icon">
+          <img src="/images/FireNex Fire-Logo.png" alt="FireNex Logo" />
+        </div>
+        <p className="sos-auth-eyebrow">BUREAU OF FIRE PROTECTION</p>
+        <h1>Reset password</h1>
+        <p className="sos-auth-subtitle">Create a new password for your FireNex account.</p>
+
+        <form onSubmit={handleReset}>
+          <label htmlFor="sos-new-password">New password</label>
+          <div className="sos-password-wrapper">
+            <input
+              id="sos-new-password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="new-password"
+              placeholder="Enter new password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={6}
+              required
+            />
+            <button
+              className="sos-password-toggle"
+              type="button"
+              onClick={() => setShowPassword((previous) => !previous)}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          <label htmlFor="sos-confirm-password">Confirm new password</label>
+          <input
+            id="sos-confirm-password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            placeholder="Re-enter new password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            minLength={6}
+            required
+          />
+
+          {error && (
+            <p className="sos-auth-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button className="sos-auth-button" type="submit" disabled={submitting}>
+            {submitting ? "Updating..." : "Update password"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 export default function AuthGate() {
   const [session, setSession] = useState(undefined);
   const [profile, setProfile] = useState(null);
@@ -10,13 +334,11 @@ export default function AuthGate() {
 
     supabase.auth.getSession().then(({ data, error }) => {
       if (!alive) return;
-
       if (error) {
         console.error("Session check failed:", error.message);
         setSession(null);
         return;
       }
-
       setSession(data.session);
     });
 
@@ -24,11 +346,9 @@ export default function AuthGate() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!alive) return;
-
       if (event === "PASSWORD_RECOVERY") {
         setRecoveryMode(true);
       }
-
       setSession(newSession);
     });
 
@@ -42,7 +362,10 @@ export default function AuthGate() {
     let alive = true;
 
     async function loadProfile() {
+      console.log("1. loadProfile started. Session:", session?.user?.id);
+
       if (!session?.user || recoveryMode) {
+        console.log("2. No session or recovery mode. Stopping.");
         setProfile(null);
         setProfileError("");
         setCheckingProfile(false);
@@ -52,25 +375,25 @@ export default function AuthGate() {
       setCheckingProfile(true);
       setProfileError("");
 
-      // --- OFFLINE CHECK START ---
       if (!navigator.onLine) {
-        console.log("App is offline. Loading cached profile.");
+        console.log("3. App is offline. Checking cache.");
         const cachedProfile = localStorage.getItem("firenex_profile");
-        
         if (cachedProfile) {
+          console.log("4. Found cached profile!");
           setProfile(JSON.parse(cachedProfile));
           setCheckingProfile(false);
           return;
         } else {
-          setProfileError("You are offline and no cached profile was found. Please connect to the internet to verify your account.");
+          console.log("4. No cached profile found.");
+          setProfileError("You are offline and no cached profile was found. Please connect to the internet.");
           setCheckingProfile(false);
           return;
         }
       }
-      // --- OFFLINE CHECK END ---
 
       setProfile(null);
 
+      console.log("5. Fetching profile from Supabase...");
       const { data, error } = await supabase
         .from("profiles")
         .select("id, full_name, role, active")
@@ -78,55 +401,40 @@ export default function AuthGate() {
         .maybeSingle();
 
       if (!alive) return;
+      console.log("6. Supabase response:", { data, error });
 
       if (error) {
-        console.error("Profile lookup failed:", error.message);
-        setProfileError(
-          "Unable to verify your account permissions. Please contact the administrator."
-        );
+        console.log("7. Error fetching profile.");
+        setProfileError("Unable to verify your account permissions. Please contact the administrator.");
       } else if (!data) {
-        setProfileError(
-          "No profile was found for your account. Please contact the administrator."
-        );
+        console.log("7. No data found.");
+        setProfileError("No profile was found for your account. Please contact the administrator.");
       } else if (!data.active) {
-        setProfileError(
-          "Your account is inactive or awaiting administrator approval."
-        );
+        console.log("7. Account inactive.");
+        setProfileError("Your account is inactive or awaiting administrator approval.");
       } else if (!["superadmin", "admin"].includes(data.role)) {
-        setProfileError(
-          "Your account does not have an authorized FireNex role."
-        );
+        console.log("7. Unauthorized role.");
+        setProfileError("Your account does not have an authorized FireNex role.");
       } else {
+        console.log("7. Success! Saving to localStorage.");
         localStorage.setItem("firenex_profile", JSON.stringify(data));
-        // -----------------------------------
 
-        // Automatically start duty session for BFP personnel only.
         if (data.role === "admin") {
-          const { data: dutySession, error: dutyError } =
-            await supabase.rpc("start_duty_session");
-
-          if (!alive) return;
-
+          console.log("8. Starting duty session...");
+          const { data: dutySession, error: dutyError } = await supabase.rpc("start_duty_session");
+          console.log("9. Duty session response:", { dutySession, dutyError });
           if (dutyError) {
-            console.error("Failed to start duty session:", dutyError);
-            
-            // We log the error but DO NOT block the user from logging in.
-            // This is important for offline resilience.
-            // If you really want to block them, uncomment the lines below:
-            // setProfileError("Unable to start your duty session...");
-            // setCheckingProfile(false);
-            // return;
-          } else {
-            console.log("BFP duty session active:", dutySession);
+            console.error("10. Duty session failed, but continuing login.");
           }
         }
 
         if (!alive) return;
-
+        console.log("11. Setting profile state.");
         setProfile(data);
       }
 
       setCheckingProfile(false);
+      console.log("12. loadProfile finished.");
     }
 
     loadProfile();
@@ -138,17 +446,12 @@ export default function AuthGate() {
 
   async function handleSignOut() {
     try {
-      // End the duty session only for BFP personnel (admin).
-      // Only do this if we are online.
       if (navigator.onLine && profile?.role === "admin") {
-        const { data, error } = await supabase.rpc("end_duty_session");
+        const { error } = await supabase.rpc("end_duty_session");
         if (error) throw error;
       }
 
-      // Clear the cached profile on logout
       localStorage.removeItem("firenex_profile");
-
-      // Sign out from Supabase
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) throw signOutError;
       return true;

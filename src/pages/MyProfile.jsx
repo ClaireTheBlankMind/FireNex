@@ -25,11 +25,26 @@ export default function MyProfile({ onBack }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  async function loadProfile() {
+    async function loadProfile() {
     setLoading(true);
     setError("");
 
     try {
+      // ⭐ OFFLINE FALLBACK — use cached profile if no network
+      if (!navigator.onLine) {
+        const cached = localStorage.getItem("firenex_profile");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          setProfile(parsed);
+          setFullName(parsed.full_name || "");
+          setUser({ email: parsed.email || "Cached user" });
+          setLoading(false);
+          return;
+        } else {
+          throw new Error("You are offline and your profile is not cached on this device.");
+        }
+      }
+
       const { data: authData, error: authError } =
         await supabase.auth.getUser();
 
@@ -48,15 +63,25 @@ export default function MyProfile({ onBack }) {
       if (profileError) throw profileError;
 
       if (!data) {
-        throw new Error(
-          "Your profile record was not found. Please contact your system administrator."
-        );
+        throw new Error("Your profile record was not found. Please contact your system administrator.");
       }
 
       setProfile(data);
       setFullName(data.full_name || "");
+
+      // ⭐ Keep local cache fresh — also update the AuthGate's cache
+      localStorage.setItem("firenex_profile", JSON.stringify(data));
     } catch (err) {
-      setError(err.message || "Unable to load your profile.");
+      // ⭐ Last-resort fallback — if fetch fails midway, use cache
+      const cached = localStorage.getItem("firenex_profile");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setProfile(parsed);
+        setFullName(parsed.full_name || "");
+        setUser({ email: parsed.email || "Cached user" });
+      } else {
+        setError(err.message || "Unable to load your profile.");
+      }
     } finally {
       setLoading(false);
     }
@@ -66,7 +91,7 @@ export default function MyProfile({ onBack }) {
     loadProfile();
   }, []);
 
-  async function saveProfile(event) {
+    async function saveProfile(event) {
     event.preventDefault();
     setError("");
     setMessage("");
@@ -80,6 +105,12 @@ export default function MyProfile({ onBack }) {
 
     if (trimmedName.length > 100) {
       setError("Full name must not exceed 100 characters.");
+      return;
+    }
+
+    // ⭐ Block saves while offline
+    if (!navigator.onLine) {
+      setError("You are offline. Profile changes can only be saved when connected.");
       return;
     }
 

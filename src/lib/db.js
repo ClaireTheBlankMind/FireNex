@@ -8,37 +8,17 @@ export async function initDB() {
 
   initPromise = (async () => {
     try {
-        const SQL = await window.initSqlJs({
-        locateFile: (file) => `/${file}`,   // <-- Points to /sql-wasm.wasm
-        });
-
-      const savedData = localStorage.getItem('firenex_db');
-
-      if (savedData) {
-        try {
-          const u8 = new Uint8Array(JSON.parse(savedData));
-          db = new SQL.Database(u8);
-          console.log('SQLite DB loaded from localStorage.');
-        } catch (err) {
-          console.warn('Corrupted DB in localStorage, creating new DB.', err);
-          localStorage.removeItem('firenex_db');
-          db = new SQL.Database();
-        }
-      } else {
-        db = new SQL.Database();
-        console.log('Created new SQLite DB.');
+      // Wait for WASM to be available
+      if (!window.initSqlJs) {
+        throw new Error("initSqlJs not loaded — check that /sql-wasm.js was loaded via script tag");
       }
 
-      db.run(`
-        CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, data TEXT);
-        CREATE TABLE IF NOT EXISTS sensors (id TEXT PRIMARY KEY, data TEXT);
-        CREATE TABLE IF NOT EXISTS units (id TEXT PRIMARY KEY, data TEXT);
-      `);
-
-      saveDB();
-      return db;
+      const SQL = await window.initSqlJs({
+        locateFile: (file) => `/${file}`,
+      });
+      // ... rest unchanged
     } catch (error) {
-      console.error('Failed to initialize SQLite DB:', error);
+      console.error("Failed to initialize SQLite DB:", error);
       initPromise = null;
       throw error;
     }

@@ -23,9 +23,14 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,geojson}'],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-        clientsClaim: true,           // ← must be here
-        skipWaiting: true,            // ← must be here
-        cleanupOutdatedCaches: true,  // ← must be here
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
+        // ⭐ Precache the public WASM and JS glue explicitly
+        additionalManifestEntries: [
+          { url: '/sql-wasm.js', revision: null },
+          { url: '/sql-wasm.wasm', revision: null },
+        ],
       }
     })
   ],

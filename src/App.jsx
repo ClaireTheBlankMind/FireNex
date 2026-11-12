@@ -254,8 +254,12 @@ export default function App({ profile, onSignOut }) {
     let cancelled = false;
 
     async function initializeApp() {
-      // Initialize SQLite FIRST
-      await initDB();
+      try {
+        await initDB();
+        console.log("SQLite DB ready.");
+      } catch (err) {
+        console.warn("SQLite unavailable — offline data caching disabled for this session.", err);
+      }
       
       try {
         const { data, error } = await supabase.auth.getSession();

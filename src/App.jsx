@@ -1,6 +1,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./lib/supabase.js";
+import { initDB, saveDataToTable, getDataFromTable } from "./lib/db.js"; // NEW
 
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -36,11 +37,18 @@ export default function App({ profile, onSignOut }) {
   const [dispatchNotice, setDispatchNotice] = useState("");
 
   // Load the latest IoT reading for each sensor.
-  const fetchSensorReadings = useCallback(async () => {
+    const fetchSensorReadings = useCallback(async () => {
     setSensorLoading(true);
     setSensorError("");
 
     try {
+      if (!navigator.onLine) {
+        console.log("Offline: Loading sensors from SQLite");
+        const cachedSensors = getDataFromTable('sensors');
+        setSensors(cachedSensors);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("sensor_readings")
         .select(
@@ -51,7 +59,6 @@ export default function App({ profile, onSignOut }) {
       if (error) throw error;
 
       const latestBySensor = new Map();
-
       for (const reading of data ?? []) {
         if (!latestBySensor.has(reading.sensor_id)) {
           latestBySensor.set(reading.sensor_id, {
@@ -68,14 +75,16 @@ export default function App({ profile, onSignOut }) {
         }
       }
 
-      setSensors(Array.from(latestBySensor.values()));
+      const sensorArray = Array.from(latestBySensor.values());
+      setSensors(sensorArray);
+      
+      // Save to SQLite for offline use
+      saveDataToTable('sensors', sensorArray);
 
       console.log("Loaded IoT sensors:", latestBySensor.size);
     } catch (error) {
       console.error("Failed to load IoT sensor readings:", error);
-      setSensorError(
-        error.message || "Failed to load sensor readings."
-      );
+      setSensorError(error.message || "Failed to load sensor readings.");
     } finally {
       setSensorLoading(false);
     }
@@ -83,6 +92,29 @@ export default function App({ profile, onSignOut }) {
 
   // Save new incidents directly to Supabase.
   const saveIncidentToSupabase = useCallback(async (incident) => {
+
+        // OFFLINE FALLBACK
+    if (!navigator.onLine) {
+      console.log("Offline: Saving incident to local SQLite.");
+      const localIncident = {
+        ...incident,
+        id: `local_${Date.now()}`,
+        dbId: `local_${Date.now()}`,
+        created_at: new Date().toISOString(),
+        status: "Reported",
+        is_synced: false // We will use this later to sync
+      };
+      
+      // Get current local incidents, add the new one, and save
+      const current = getDataFromTable('incidents');
+      saveDataToTable('incidents', [localIncident, ...current]);
+      
+      // Update UI
+      setIncidents(prev => [localIncident, ...prev]);
+      
+      return localIncident;
+    }
+
     const { data, error } = await supabase
       .from("incidents")
       .insert({
@@ -112,78 +144,49 @@ export default function App({ profile, onSignOut }) {
   }, []);
 
   // Load incidents and response units directly from Supabase.
-  const fetchDispatchData = useCallback(async () => {
+    const fetchDispatchData = useCallback(async () => {
     setDispatchLoading(true);
     setDispatchError("");
     setDispatchNotice("");
 
     try {
-      const [incidentResult, unitResult] = await Promise.all([
-        supabase
-          .from("incidents")
-          .select("*")
-          .order("created_at", { ascending: false }),
+      if (!navigator.onLine) {
+        console.log("Offline: Loading dispatch data from SQLite");
+        setIncidents(getDataFromTable('incidents'));
+        setUnits(getDataFromTable('units'));
+        return;
+      }
 
-        supabase
-          .from("response_units")
-          .select(
-            "id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at"
-          )
-          .order("created_at", { ascending: true }),
+      const [incidentResult, unitResult] = await Promise.all([
+        supabase.from("incidents").select("*").order("created_at", { ascending: false }),
+        supabase.from("response_units").select("id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at").order("created_at", { ascending: true }),
       ]);
 
-      if (incidentResult.error) {
-        throw new Error(
-          `Could not load incidents: ${incidentResult.error.message}`
-        );
-      }
-
-      if (unitResult.error) {
-        throw new Error(
-          `Could not load response units: ${unitResult.error.message}`
-        );
-      }
+      if (incidentResult.error) throw new Error(`Could not load incidents: ${incidentResult.error.message}`);
+      if (unitResult.error) throw new Error(`Could not load response units: ${unitResult.error.message}`);
 
       const incidentRows = incidentResult.data ?? [];
       const unitRows = unitResult.data ?? [];
 
       const mappedIncidents = incidentRows.map((row) => ({
         ...row,
-
         id: row.id,
         dbId: row.id,
         databaseId: row.id,
-
-        title:
-          row.description?.split("\n")[0] ||
-          row.reference_no ||
-          "Fire emergency",
-
+        title: row.description?.split("\n")[0] || row.reference_no || "Fire emergency",
         description: row.description || "Fire emergency",
         reference_no: row.reference_no || "",
         barangay: row.barangay || "",
         address: row.address || "",
-        location:
-          row.address || row.barangay || "Location unavailable",
-
-        latitude:
-          row.latitude == null ? null : Number(row.latitude),
-
-        longitude:
-          row.longitude == null ? null : Number(row.longitude),
-
-        lat:
-          row.latitude == null ? null : Number(row.latitude),
-
-        lng:
-          row.longitude == null ? null : Number(row.longitude),
-
+        location: row.address || row.barangay || "Location unavailable",
+        latitude: row.latitude == null ? null : Number(row.latitude),
+        longitude: row.longitude == null ? null : Number(row.longitude),
+        lat: row.latitude == null ? null : Number(row.latitude),
+        lng: row.longitude == null ? null : Number(row.longitude),
         assignedUnit: row.assigned_unit_id || "",
         assigned_unit_id: row.assigned_unit_id || null,
-
         status: row.status || "Reported",
         priority: row.priority || "Medium",
-
         reportedAt: row.created_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -192,36 +195,22 @@ export default function App({ profile, onSignOut }) {
       const mappedUnits = unitRows.map((row) => {
         const assignedIncident = mappedIncidents.find(
           (incident) =>
-            String(incident.assigned_unit_id || "") ===
-              String(row.id) &&
-            !["Resolved", "Completed", "Cancelled"].includes(
-              String(incident.status)
-            )
+            String(incident.assigned_unit_id || "") === String(row.id) &&
+            !["Resolved", "Completed", "Cancelled"].includes(String(incident.status))
         );
 
         return {
           ...row,
-
           id: row.id,
           name: row.unit_name || "Unnamed Unit",
           type: row.vehicle_type || "Response Unit",
           status: row.status || "Available",
           active: row.active ?? true,
-
-          lat:
-            row.latitude == null ? null : Number(row.latitude),
-
-          lng:
-            row.longitude == null ? null : Number(row.longitude),
-
-          latitude:
-            row.latitude == null ? null : Number(row.latitude),
-
-          longitude:
-            row.longitude == null ? null : Number(row.longitude),
-
+          lat: row.latitude == null ? null : Number(row.latitude),
+          lng: row.longitude == null ? null : Number(row.longitude),
+          latitude: row.latitude == null ? null : Number(row.latitude),
+          longitude: row.longitude == null ? null : Number(row.longitude),
           last_location_at: row.last_location_at || null,
-
           assignedIncident: assignedIncident?.id || "",
         };
       });
@@ -229,23 +218,18 @@ export default function App({ profile, onSignOut }) {
       setIncidents(mappedIncidents);
       setUnits(mappedUnits);
 
-      console.log("Supabase dispatch data loaded:", {
-        incidentCount: mappedIncidents.length,
-        responseUnitCount: mappedUnits.length,
-        responseUnits: mappedUnits,
-      });
+      // Save to SQLite for offline use
+      saveDataToTable('incidents', mappedIncidents);
+      saveDataToTable('units', mappedUnits);
+
+      console.log("Supabase dispatch data loaded and cached.");
 
       if (mappedUnits.length === 0) {
-        setDispatchNotice(
-          "No response units are visible to this query. Check whether public.response_units contains records and whether your current user has SELECT access."
-        );
+        setDispatchNotice("No response units are visible to this query.");
       }
     } catch (error) {
       console.error("Failed to load dispatch data:", error);
-
-      setDispatchError(
-        error.message || "Could not load dispatch data."
-      );
+      setDispatchError(error.message || "Could not load dispatch data.");
     } finally {
       setDispatchLoading(false);
     }
@@ -256,32 +240,25 @@ export default function App({ profile, onSignOut }) {
     let cancelled = false;
 
     async function initializeApp() {
+      // Initialize SQLite FIRST
+      await initDB();
+      
       try {
         const { data, error } = await supabase.auth.getSession();
-
         if (error) throw error;
-
         if (!cancelled) {
           console.log("Supabase client is responding.");
-          console.log(
-            "User logged in:",
-            Boolean(data.session?.user)
-          );
+          console.log("User logged in:", Boolean(data.session?.user));
         }
       } catch (error) {
         if (!cancelled) {
-          console.error(
-            "Supabase connection check failed:",
-            error.message
-          );
+          console.error("Supabase connection check failed:", error.message);
         }
       }
 
       if (!cancelled) {
-        await Promise.all([
-          fetchSensorReadings(),
-          fetchDispatchData(),
-        ]);
+        // This will now check navigator.onLine and use SQLite if needed
+        await Promise.all([fetchSensorReadings(), fetchDispatchData()]);
       }
     }
 

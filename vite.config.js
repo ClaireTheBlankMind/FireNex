@@ -21,7 +21,7 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,geojson}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,geojson}'],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         // Add these two lines so the Service Worker caches the public files
         additionalManifestEntries: [

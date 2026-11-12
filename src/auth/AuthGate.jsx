@@ -97,6 +97,9 @@ export default function AuthGate() {
           "Your account does not have an authorized FireNex role."
         );
       } else {
+        localStorage.setItem("firenex_profile", JSON.stringify(data));
+        // -----------------------------------
+
         // Automatically start duty session for BFP personnel only.
         if (data.role === "admin") {
           const { data: dutySession, error: dutyError } =
@@ -106,20 +109,19 @@ export default function AuthGate() {
 
           if (dutyError) {
             console.error("Failed to start duty session:", dutyError);
-            setProfileError(
-              "Unable to start your duty session. Please try signing in again or contact the administrator."
-            );
-            setCheckingProfile(false);
-            return;
+            
+            // We log the error but DO NOT block the user from logging in.
+            // This is important for offline resilience.
+            // If you really want to block them, uncomment the lines below:
+            // setProfileError("Unable to start your duty session...");
+            // setCheckingProfile(false);
+            // return;
+          } else {
+            console.log("BFP duty session active:", dutySession);
           }
-          console.log("BFP duty session active:", dutySession);
         }
 
         if (!alive) return;
-
-        // --- SAVE PROFILE TO CACHE START ---
-        localStorage.setItem("firenex_profile", JSON.stringify(data));
-        // --- SAVE PROFILE TO CACHE END ---
 
         setProfile(data);
       }

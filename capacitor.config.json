@@ -1,0 +1,6 @@
+{
+  "appId": "com.firenex.bfp",
+  "appName": "FireNex",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

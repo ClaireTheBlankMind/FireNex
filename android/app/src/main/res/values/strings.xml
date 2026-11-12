@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FireNex</string>
+    <string name="title_activity_main">FireNex</string>
+    <string name="package_name">com.FireNex.bfp</string>
+    <string name="custom_url_scheme">com.FireNex.bfp</string>
+</resources>

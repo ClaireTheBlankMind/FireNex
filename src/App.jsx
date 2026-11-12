@@ -37,18 +37,12 @@ export default function App({ profile, onSignOut }) {
   const [dispatchNotice, setDispatchNotice] = useState("");
 
   // Load the latest IoT reading for each sensor.
-    const fetchSensorReadings = useCallback(async () => {
+      const fetchSensorReadings = useCallback(async () => {
     setSensorLoading(true);
     setSensorError("");
 
     try {
-      if (!navigator.onLine) {
-        console.log("Offline: Loading sensors from SQLite");
-        const cachedSensors = getDataFromTable('sensors');
-        setSensors(cachedSensors);
-        return;
-      }
-
+      // ALWAYS try to fetch from Supabase first (assume online)
       const { data, error } = await supabase
         .from("sensor_readings")
         .select(
@@ -56,6 +50,7 @@ export default function App({ profile, onSignOut }) {
         )
         .order("recorded_at", { ascending: false });
 
+      // If we got a network error, this line triggers the catch block below
       if (error) throw error;
 
       const latestBySensor = new Map();
@@ -78,13 +73,21 @@ export default function App({ profile, onSignOut }) {
       const sensorArray = Array.from(latestBySensor.values());
       setSensors(sensorArray);
       
-      // Save to SQLite for offline use
+      // Save to SQLite (ONLY if success)
       saveDataToTable('sensors', sensorArray);
+      console.log("Loaded IoT sensors from Supabase:", latestBySensor.size);
 
-      console.log("Loaded IoT sensors:", latestBySensor.size);
     } catch (error) {
-      console.error("Failed to load IoT sensor readings:", error);
-      setSensorError(error.message || "Failed to load sensor readings.");
+      // If the request failed, fall back to local cache
+      console.log("Supabase fetch failed. Falling back to SQLite cache.", error.message);
+      const cachedSensors = getDataFromTable('sensors');
+      
+      if (cachedSensors.length > 0) {
+        setSensors(cachedSensors);
+        console.log("Loaded IoT sensors from SQLite cache:", cachedSensors.length);
+      } else {
+        setSensorError("You are offline and no sensor data has been cached yet.");
+      }
     } finally {
       setSensorLoading(false);
     }
@@ -144,24 +147,27 @@ export default function App({ profile, onSignOut }) {
   }, []);
 
   // Load incidents and response units directly from Supabase.
-    const fetchDispatchData = useCallback(async () => {
+      const fetchDispatchData = useCallback(async () => {
     setDispatchLoading(true);
     setDispatchError("");
     setDispatchNotice("");
 
     try {
-      if (!navigator.onLine) {
-        console.log("Offline: Loading dispatch data from SQLite");
-        setIncidents(getDataFromTable('incidents'));
-        setUnits(getDataFromTable('units'));
-        return;
-      }
-
       const [incidentResult, unitResult] = await Promise.all([
-        supabase.from("incidents").select("*").order("created_at", { ascending: false }),
-        supabase.from("response_units").select("id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at").order("created_at", { ascending: true }),
+        supabase
+          .from("incidents")
+          .select("*")
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("response_units")
+          .select(
+            "id, unit_name, vehicle_type, status, active, latitude, longitude, last_location_at, created_at"
+          )
+          .order("created_at", { ascending: true }),
       ]);
 
+      // If Supabase threw an error, we throw it to the catch block
       if (incidentResult.error) throw new Error(`Could not load incidents: ${incidentResult.error.message}`);
       if (unitResult.error) throw new Error(`Could not load response units: ${unitResult.error.message}`);
 
@@ -217,19 +223,27 @@ export default function App({ profile, onSignOut }) {
 
       setIncidents(mappedIncidents);
       setUnits(mappedUnits);
-
-      // Save to SQLite for offline use
+      
+      // Save to SQLite (ONLY if success)
       saveDataToTable('incidents', mappedIncidents);
       saveDataToTable('units', mappedUnits);
+      
+      console.log("Supabase dispatch data loaded and cached to SQLite.");
 
-      console.log("Supabase dispatch data loaded and cached.");
-
-      if (mappedUnits.length === 0) {
-        setDispatchNotice("No response units are visible to this query.");
-      }
     } catch (error) {
-      console.error("Failed to load dispatch data:", error);
-      setDispatchError(error.message || "Could not load dispatch data.");
+      // If the request failed, fall back to local cache
+      console.log("Supabase fetch failed. Falling back to SQLite cache.", error.message);
+      
+      const cachedIncidents = getDataFromTable('incidents');
+      const cachedUnits = getDataFromTable('units');
+      
+      if (cachedIncidents.length > 0 || cachedUnits.length > 0) {
+        setIncidents(cachedIncidents);
+        setUnits(cachedUnits);
+        console.log(`Loaded ${cachedIncidents.length} incidents and ${cachedUnits.length} units from SQLite cache.`);
+      } else {
+        setDispatchError("You are offline and no dispatch data has been cached yet.");
+      }
     } finally {
       setDispatchLoading(false);
     }

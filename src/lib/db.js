@@ -8,39 +8,47 @@ export async function initDB() {
 
   initPromise = (async () => {
     try {
-      // Use the global from the script tag
-      const SQL = await window.initSqlJs({
-        locateFile: (file) => `/${file}`, // e.g. /sql-wasm.wasm
-      });
-
-      const savedData = localStorage.getItem('firenex_db');
-      if (savedData) {
-        try {
-          db = new SQL.Database(new Uint8Array(JSON.parse(savedData)));
-        } catch {
-          localStorage.removeItem('firenex_db');
-          db = new SQL.Database();
-        }
-      } else {
-        db = new SQL.Database();
+      // Wait for WASM loader to be available
+      if (!window.initSqlJs) {
+        throw new Error(
+          "initSqlJs not loaded — check that /sql-wasm.js was loaded via script tag"
+        );
       }
 
-      db.run(`
-        CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, data TEXT);
-        CREATE TABLE IF NOT EXISTS sensors (id TEXT PRIMARY KEY, data TEXT);
-        CREATE TABLE IF NOT EXISTS units (id TEXT PRIMARY KEY, data TEXT);
-      `);
+      // Point to the local .wasm file (bundled with your app).
+      // Do NOT rely on a CDN — that's what causes ERR_INTERNET_DISCONNECTED.
+      const SQL = await window.initSqlJs({
+        locateFile: (file) => {
+          // Resolve relative to the current page/app base URL
+          const base = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "/";
+          return `${base.replace(/\/$/, "")}/${file}`;
+        },
+      });
 
-      saveDB();
+      db = new SQL.Database();
       return db;
     } catch (error) {
-      console.error('DB init failed:', error);
-      initPromise = null;
+      console.error("Failed to initialize SQLite DB:", error);
+      initPromise = null; // allow retry
+      db = null;
       throw error;
     }
   })();
 
   return initPromise;
+}
+
+export function getDB() {
+  if (!db) throw new Error("DB not initialized — call initDB() first");
+  return db;
+}
+
+export function closeDB() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+  initPromise = null;
 }
 
 export function saveDB() {

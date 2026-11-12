@@ -1,5 +1,5 @@
 import initSqlJs from 'sql.js';
-import wasmUrl from "../assets/sql-wasm.wasm?url";
+import wasmUrl from '../assets/sql-wasm.wasm?url';
 
 let db = null;
 let initPromise = null;
@@ -10,17 +10,7 @@ export async function initDB() {
 
   initPromise = (async () => {
     try {
-      // sql.js 1.16+ may wrap the default export; normalize it
-      const initFn =
-        typeof initSqlJs === 'function'
-          ? initSqlJs
-          : initSqlJs.default || initSqlJs.initSqlJs;
-
-      if (typeof initFn !== 'function') {
-        throw new Error('initSqlJs is not a function — check sql.js import');
-      }
-
-      const SQL = await initFn({
+      const SQL = await initSqlJs({
         locateFile: () => wasmUrl,
       });
 

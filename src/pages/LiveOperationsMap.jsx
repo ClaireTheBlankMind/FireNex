@@ -19,6 +19,11 @@ import {
 
 import StatusBadge from "../components/StatusBadge";
 import { supabase } from "../lib/supabase.js";
+import {
+  saveDataToTable,
+  getDataFromTable,
+  addToSyncQueue,
+} from "../lib/db.js";
 
 // Verified BFP Hide-out coordinates.
 const DEMO_BFP_ORIGIN = [7.7944583, 123.7193828];
@@ -472,6 +477,7 @@ const incidentsWithMapLocations = useMemo(() => {
     [sensors]
   );  
 
+
 async function addTestEmergency(sender) {
   if (creatingTestRequest) return;
 
@@ -484,48 +490,134 @@ async function addTestEmergency(sender) {
   setCreatingTestRequest(true);
 
   try {
-    // Get the authenticated Supabase user.
+    // Get the locally available authenticated session.
     const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
-    if (userError) throw userError;
+    if (sessionError) throw sessionError;
 
-    if (!user) {
-      throw new Error("Please sign in before creating a test request.");
+    if (!session?.user) {
+      throw new Error(
+        "No saved login session is available. Please sign in while online first."
+      );
     }
 
     const now = new Date().toISOString();
+
+    // Generate this reference number only once.
     const referenceNo = `SOS-${Date.now()}-${sender.id}`;
 
-    // Save the simulated incident to Supabase.
-    const { data: savedIncident, error: insertError } = await supabase
-      .from("incidents")
-      .insert({
-        reference_no: referenceNo,
-        reporter_name: sender.name,
-        description:
-          "SIMULATED RESCUE REQUEST - Testing only. Do not dispatch.",
-        barangay: sender.barangay,
-        address: sender.barangay,
-        latitude: sender.lat,
-        longitude: sender.lng,
-        priority: "High",
-        status: "Reported",
-        created_by: user.id,
-      })
-      .select("*")
-      .single();
+    const incidentPayload = {
+      reference_no: referenceNo,
+      reporter_name: sender.name,
+      description:
+        "SIMULATED RESCUE REQUEST - Testing only. Do not dispatch.",
+      barangay: sender.barangay,
+      address: sender.barangay,
+      latitude: sender.lat,
+      longitude: sender.lng,
+      priority: "High",
+      status: "Reported",
+      created_by: session.user.id,
+    };
+
+    // Save locally and queue the incident for synchronization.
+    const saveLocally = async () => {
+      const localId = `local_${crypto.randomUUID()}`;
+
+      const localIncident = {
+        ...incidentPayload,
+
+        id: localId,
+        dbId: localId,
+        databaseId: null,
+
+        title: `Rescue Request - ${sender.name}`,
+        location: sender.barangay,
+        lat: sender.lat,
+        lng: sender.lng,
+
+        severity: "High",
+        source: "Simulated Resident Request",
+        senderId: sender.id,
+        senderName: sender.name,
+
+        reportedAt: now,
+        createdAt: now,
+        created_at: now,
+        updatedAt: now,
+
+        isTest: true,
+        is_synced: false,
+        sync_status: "pending",
+
+        statusHistory: [
+          {
+            status: "Reported",
+            timestamp: now,
+            note: "Simulated rescue request. Do not dispatch.",
+          },
+        ],
+      };
+
+      // Add the pending operation to the synchronization queue.
+      await addToSyncQueue({
+        action: "insert",
+        table: "incidents",
+        local_record_id: localId,
+        payload: incidentPayload,
+      });
+
+      // Preserve existing cached incidents.
+      const cachedIncidents =
+        await getDataFromTable("incidents");
+
+      const updatedCache = [
+        localIncident,
+        ...cachedIncidents.filter(
+          (item) => item.reference_no !== referenceNo
+        ),
+      ];
+
+      await saveDataToTable("incidents", updatedCache);
+
+      // Immediately display the incident on the dashboard.
+      setIncidents((previous) => [
+        localIncident,
+        ...previous.filter(
+          (item) => item.reference_no !== referenceNo
+        ),
+      ]);
+
+      window.alert(
+        `Test rescue request saved on this device.\nReference: ${referenceNo}\n\nIt is waiting to synchronize with Supabase.`
+      );
+    };
+
+    // If offline, save locally without attempting a Supabase insert.
+    if (!navigator.onLine) {
+      await saveLocally();
+      return;
+    }
+
+    // Otherwise, save directly to Supabase.
+    const { data: savedIncident, error: insertError } =
+      await supabase
+        .from("incidents")
+        .insert(incidentPayload)
+        .select("*")
+        .single();
 
     if (insertError) throw insertError;
 
     if (!savedIncident?.id) {
-      throw new Error("Supabase did not return the saved incident ID.");
+      throw new Error(
+        "Supabase did not return the saved incident ID."
+      );
     }
 
-
-    // Use the actual Supabase record.
     const incident = {
       id: savedIncident.id,
       dbId: savedIncident.id,
@@ -556,6 +648,8 @@ async function addTestEmergency(sender) {
       updatedAt: savedIncident.updated_at || now,
 
       isTest: true,
+      is_synced: true,
+      sync_status: "synced",
 
       statusHistory: [
         {
@@ -566,19 +660,48 @@ async function addTestEmergency(sender) {
       ],
     };
 
-    // Update the dashboard only after successful database insertion.
-    setIncidents((previous) => [incident, ...previous]);
+    setIncidents((previous) => [
+      incident,
+      ...previous.filter(
+        (item) =>
+          item.reference_no !== savedIncident.reference_no
+      ),
+    ]);
 
     window.alert(
       `Test rescue request saved successfully!\nReference: ${savedIncident.reference_no}`
     );
 
   } catch (error) {
-    console.error("Failed to save simulated rescue request:", error);
-
-    window.alert(
-      `Failed to save rescue request:\n${error.message}`
+    console.error(
+      "Failed to save simulated rescue request:",
+      error
     );
+
+    // Queue only network-related failures.
+    const isNetworkFailure =
+      !navigator.onLine ||
+      error instanceof TypeError ||
+      error?.name === "AbortError" ||
+      error?.message?.toLowerCase().includes("fetch") ||
+      error?.message?.toLowerCase().includes("network");
+
+    if (isNetworkFailure) {
+      try {
+        // Reuse the same reference number if the online request failed.
+        // The reference number is generated above, so this fallback
+        // must be handled before leaving the original try block.
+        throw new Error(
+          "The connection failed during the Supabase request. Please retry after checking the connection."
+        );
+      } catch (fallbackError) {
+        window.alert(fallbackError.message);
+      }
+    } else {
+      window.alert(
+        `Failed to save rescue request:\n${error.message}`
+      );
+    }
 
   } finally {
     setCreatingTestRequest(false);

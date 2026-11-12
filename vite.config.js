@@ -23,11 +23,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,geojson}'],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-        // Add these two lines so the Service Worker caches the public files
-        additionalManifestEntries: [
-          { url: '/sql-wasm.js', revision: null },
-          { url: '/sql-wasm.wasm', revision: null }
-        ]
+        clientsClaim: true,           // ← must be here
+        skipWaiting: true,            // ← must be here
+        cleanupOutdatedCaches: true,  // ← must be here
       }
     })
   ],

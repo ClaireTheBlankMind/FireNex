@@ -1,35 +1,37 @@
 import initSqlJs from 'sql.js';
+import wasmUrl from '../../public/assets/sql-wasm.wasm?url'; // <-- Vite handles this URL
 
 let db = null;
 
 export async function initDB() {
   if (db) return db;
 
-  // Locate the wasm file in the public folder
-  const SQL = await initSqlJs({
-    locateFile: file => `/assets/${file}` 
-  });
+  try {
+    const SQL = await initSqlJs({
+      locateFile: () => wasmUrl // Use the Vite-generated URL
+    });
 
-  // Check if we have a saved database in localStorage
-  const savedData = localStorage.getItem('firenex_db');
-  
-  if (savedData) {
-    // Load existing database from binary string
-    const u8 = new Uint8Array(JSON.parse(savedData));
-    db = new SQL.Database(u8);
-  } else {
-    // Create a new database
-    db = new SQL.Database();
-    // Create tables
-    db.run(`
-      CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, data TEXT);
-      CREATE TABLE IF NOT EXISTS sensors (id TEXT PRIMARY KEY, data TEXT);
-      CREATE TABLE IF NOT EXISTS units (id TEXT PRIMARY KEY, data TEXT);
-    `);
-    saveDB();
+    const savedData = localStorage.getItem('firenex_db');
+    
+    if (savedData) {
+      const u8 = new Uint8Array(JSON.parse(savedData));
+      db = new SQL.Database(u8);
+    } else {
+      db = new SQL.Database();
+      db.run(`
+        CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, data TEXT);
+        CREATE TABLE IF NOT EXISTS sensors (id TEXT PRIMARY KEY, data TEXT);
+        CREATE TABLE IF NOT EXISTS units (id TEXT PRIMARY KEY, data TEXT);
+      `);
+      saveDB();
+    }
+
+    console.log("SQLite DB initialized successfully.");
+    return db;
+  } catch (error) {
+    console.error("Failed to initialize SQLite DB:", error);
+    throw error;
   }
-
-  return db;
 }
 
 // Save the database to localStorage

@@ -8,9 +8,9 @@ export async function initDB() {
 
   initPromise = (async () => {
     try {
-      const SQL = await initSqlJs({
-        locateFile: () => wasmUrl,
-      });
+        const SQL = await window.initSqlJs({
+        locateFile: (file) => `/${file}`,   // <-- Points to /sql-wasm.wasm
+        });
 
       const savedData = localStorage.getItem('firenex_db');
 

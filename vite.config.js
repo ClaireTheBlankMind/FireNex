@@ -21,11 +21,13 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Cache all these file types, including WASM
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,geojson}'],
-        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // Increase to 10MB to handle large map/wasm files
-        // NEW: Make sure WASM files are served with the right headers
-        navigateFallbackDenylist: [/^\/assets\/.*\.wasm$/], 
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
+        // Add these two lines so the Service Worker caches the public files
+        additionalManifestEntries: [
+          { url: '/sql-wasm.js', revision: null },
+          { url: '/sql-wasm.wasm', revision: null }
+        ]
       }
     })
   ],

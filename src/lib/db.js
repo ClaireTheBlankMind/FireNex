@@ -1,5 +1,3 @@
-import initSqlJs from 'sql.js';
-import wasmUrl from '../assets/sql-wasm.wasm?url';
 
 let db = null;
 let initPromise = null;

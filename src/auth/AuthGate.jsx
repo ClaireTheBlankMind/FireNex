@@ -377,7 +377,7 @@ export default function AuthGate() {
 
       if (!navigator.onLine) {
         console.log("3. App is offline. Checking cache.");
-        const cachedProfile = localStorage.getItem("firenex_profile");
+        const cachedProfile = sessionStorage.getItem("firenex_profile");
         if (cachedProfile) {
           console.log("4. Found cached profile!");
           setProfile(JSON.parse(cachedProfile));
@@ -417,7 +417,7 @@ export default function AuthGate() {
         setProfileError("Your account does not have an authorized FireNex role.");
       } else {
         console.log("7. Success! Saving to localStorage.");
-        localStorage.setItem("firenex_profile", JSON.stringify(data));
+          localStorage.setItem("firenex_profile", JSON.stringify(data));
 
         if (data.role === "admin") {
           console.log("8. Starting duty session...");
@@ -451,7 +451,7 @@ export default function AuthGate() {
         if (error) throw error;
       }
 
-      localStorage.removeItem("firenex_profile");
+      sessionStorage.removeItem("firenex_profile");
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) throw signOutError;
       return true;

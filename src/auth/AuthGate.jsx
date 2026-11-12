@@ -376,15 +376,12 @@ export default function AuthGate() {
       setProfileError("");
 
       if (!navigator.onLine) {
-        console.log("3. App is offline. Checking cache.");
-        const cachedProfile = sessionStorage.getItem("firenex_profile");
+        const cachedProfile = localStorage.getItem("firenex_profile");
         if (cachedProfile) {
-          console.log("4. Found cached profile!");
           setProfile(JSON.parse(cachedProfile));
           setCheckingProfile(false);
           return;
         } else {
-          console.log("4. No cached profile found.");
           setProfileError("You are offline and no cached profile was found. Please connect to the internet.");
           setCheckingProfile(false);
           return;
@@ -417,11 +414,11 @@ export default function AuthGate() {
         setProfileError("Your account does not have an authorized FireNex role.");
       } else {
         console.log("7. Success! Saving to localStorage.");
-          localStorage.setItem("firenex_profile", JSON.stringify(data));
+        localStorage.setItem("firenex_profile", JSON.stringify(data));
 
         if (data.role === "admin") {
-          console.log("8. Starting duty session...");
-          const { data: dutySession, error: dutyError } = await supabase.rpc("start_duty_session");
+          const { data: dutySession, error: dutyError } =
+            await supabase.rpc("start_duty_session");
           console.log("9. Duty session response:", { dutySession, dutyError });
           if (dutyError) {
             console.error("10. Duty session failed, but continuing login.");

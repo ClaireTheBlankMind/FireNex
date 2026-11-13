@@ -252,7 +252,7 @@ export default function SystemLog() {
         error: actorError,
       } = await supabase
         .from("profiles")
-        .select("id, email, full_name")
+        .select("id, full_name")
         .in("id", actorBatch);
 
       if (actorError) {
@@ -304,9 +304,7 @@ export default function SystemLog() {
       log.entity_type,
       log.entity_id,
       log.actor_id,
-      log.details?.email,
       log.details?.full_name,
-      actor?.email,
       actor?.full_name,
       formatDetails(log.details),
     ]
@@ -617,7 +615,7 @@ export default function SystemLog() {
                 <tr>
                   <th>Date &amp; Time</th>
                   <th>Action</th>
-                  <th>User Email</th>
+                  <th>User Name</th>
                   <th>Activity Performed</th>
                 </tr>
               </thead>
@@ -626,11 +624,6 @@ export default function SystemLog() {
                 {filteredLogs.map((log) => {
                   const ActionIcon = getActionIcon(log.action);
                   const actor = actorProfiles[log.actor_id];
-
-                  const actorEmail =
-                    log.details?.email ||
-                    actor?.email ||
-                    "Email unavailable";
 
                   const actorName =
                     log.details?.full_name ||

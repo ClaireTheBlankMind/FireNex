@@ -665,9 +665,8 @@ export default function SystemLog() {
                           </span>
 
                           <div className="system-log-actor-copy">
-                          <strong>{actorEmail}</strong>
+                          <strong>{actorName}</strong>
 
-                          <span>{actorName}</span>
                           </div>
                         </div>
                       </td>

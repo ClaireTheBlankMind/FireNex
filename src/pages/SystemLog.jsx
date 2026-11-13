@@ -659,7 +659,6 @@ export default function SystemLog() {
 
                           <div className="system-log-actor-copy">
                           <strong>{actorName}</strong>
-
                           </div>
                         </div>
                       </td>

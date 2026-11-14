@@ -5027,3 +5027,11 @@ label,
     font-size: 12px;
   }
 }
+
+/* Fix header title font size on mobile devices */
+@media (max-width: 768px) {
+  .topbar h1 {
+    font-size: 15px !important;
+    line-height: 1.3;
+  }
+}

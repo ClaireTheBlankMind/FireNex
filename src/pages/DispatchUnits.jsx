@@ -764,13 +764,6 @@ async function handleUnitStatusChange(unit, newStatus) {
           flexWrap: "wrap",
         }}
       >
-        <div>
-          <h2 style={styles.heading}>Dispatch &amp; Units</h2>
-          <p style={styles.muted}>
-            Manage BFP response vehicles and incident assignments.
-          </p>
-        </div>
-
         <button
           type="button"
           style={{

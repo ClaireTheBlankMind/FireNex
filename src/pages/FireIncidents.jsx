@@ -134,10 +134,13 @@ useEffect(() => {
     setIncidents((previous) => {
       let changed = false;
 
-      const restored = previous.map((incident) => {
-        const key = String(
-          incident.id || incident.reference_no || ""
-        );
+    const restored = previous.map((incident) => {
+      // Never restore simulated reviews over real Supabase records.
+      if (getDatabaseId(incident)) return incident;
+
+      const key = String(
+        incident.id || incident.reference_no || ""
+      );
 
         const savedReview = savedReviews[key];
 
@@ -416,8 +419,8 @@ useEffect(() => {
     // -------------------------------------------------
     // SIMULATED INCIDENTS: SAVE LOCALLY
     // -------------------------------------------------
-
-    if (isSimulatedIncident(incident) || !dbId) {
+    
+    if (!dbId) {
       const updatedAt = new Date().toISOString();
 
       const updatedReview = {

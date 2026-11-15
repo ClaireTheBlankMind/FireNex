@@ -138,7 +138,7 @@ function getStatusStyle(status) {
   }
 
   if (
-    ["out of service", "cancelled", "critical", "high"].includes(
+    ["out of service", "cancelled",].includes(
       normalized
     )
   ) {

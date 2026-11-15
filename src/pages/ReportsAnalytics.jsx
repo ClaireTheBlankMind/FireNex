@@ -260,7 +260,6 @@ export default function ReportsAnalytics({
     return {
       resolved,
       unresolved,
-      highPriority,
       extinguishedByBFP,
       extinguishedByResidents,
       falseAlarms,

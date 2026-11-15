@@ -381,186 +381,73 @@ useEffect(() => {
   // CONFIRM OR REJECT RESCUE REQUEST
   // =====================================================
 
-  async function updateStatus(incident, decision, reason = "") {
-    if (!["CONFIRMED", "REJECTED"].includes(decision)) {
-      return;
-    }
+  
+async function updateStatus(incident, decision, reason = "") {
+  if (!["CONFIRMED", "REJECTED"].includes(decision)) {
+    return;
+  }
 
-    const currentStatus = String(
-      incident?.status || ""
-    ).toLowerCase();
+  const currentStatus = String(incident?.status || "").toLowerCase();
 
-    const reviewStatus = String(
-      incident?.review_status || "PENDING"
-    ).toUpperCase();
+  const reviewStatus = String(
+    incident?.review_status || "PENDING"
+  ).toUpperCase();
 
-    if (
-      [
-        "resolved",
-        "false alarm",
-        "completed",
-        "cancelled",
-      ].includes(currentStatus) ||
-      (reviewStatus !== "PENDING" && reviewStatus !== "NONE")
-    ) {
-      alert("This incident has already been finalized or reviewed.");
-      return;
-    }
+  if (
+    ["resolved", "false alarm", "completed", "cancelled"].includes(
+      currentStatus
+    ) ||
+    (reviewStatus !== "PENDING" && reviewStatus !== "NONE")
+  ) {
+    alert("This incident has already been finalized or reviewed.");
+    return;
+  }
 
-    reason = decision === "REJECTED" ? reason.trim() : null;
+  reason = decision === "REJECTED" ? reason.trim() : null;
 
-    if (decision === "REJECTED" && !reason) {
-      alert("A rejection reason is required.");
-      return;
-    }
+  if (decision === "REJECTED" && !reason) {
+    alert("A rejection reason is required.");
+    return;
+  }
 
-    const dbId = getDatabaseId(incident);
+  const dbId = getDatabaseId(incident);
 
-    // -------------------------------------------------
-    // SIMULATED INCIDENTS: SAVE LOCALLY
-    // -------------------------------------------------
-    
-    if (!dbId) {
-      const updatedAt = new Date().toISOString();
+  // SIMULATED INCIDENTS WITHOUT A DATABASE UUID
+  if (!dbId && isSimulatedIncident(incident)) {
+    const updatedAt = new Date().toISOString();
 
-      const updatedReview = {
-        review_status: decision,
-        review_reason: reason,
-        status: decision === "CONFIRMED" ? "Confirmed" : "Reported",
-        updated_at: updatedAt,
-      };
-
-      try {
-        const savedReviews = JSON.parse(
-          localStorage.getItem(SIMULATED_REVIEWS_KEY) || "{}"
-        );
-
-        const reviewKey = String(
-          incident.id || incident.reference_no || ""
-        );
-
-        savedReviews[reviewKey] = updatedReview;
-
-        localStorage.setItem(
-          SIMULATED_REVIEWS_KEY,
-          JSON.stringify(savedReviews)
-        );
-
-        // Record audit activity in Supabase.
-        await recordSystemActivity({
-          action:
-            decision === "CONFIRMED"
-              ? "CONFIRM_RESCUE_REQUEST"
-              : "REJECT_RESCUE_REQUEST",
-          incident,
-          activity:
-            decision === "CONFIRMED"
-              ? "Confirmed a rescue request"
-              : "Rejected a rescue request",
-          extraDetails: {
-            review_status: decision,
-            review_reason: reason,
-            simulated: true,
-          },
-        });
-
-        // Update displayed incident.
-        if (setIncidents) {
-          setIncidents((previous) =>
-            previous.map((item) =>
-              item.id === incident.id
-                ? {
-                    ...item,
-                    ...updatedReview,
-                  }
-                : item
-            )
-          );
-        }
-
-        setReviewForm(null);
-        setReviewReason("");
-
-        setReviewNotice({
-          type: decision === "CONFIRMED" ? "success" : "danger",
-          title:
-            decision === "CONFIRMED"
-              ? "Request Successfully Confirmed"
-              : "Request Successfully Rejected",
-          message:
-            decision === "CONFIRMED"
-              ? "The simulated rescue request has been confirmed and saved locally."
-              : "The simulated rescue request has been rejected and saved locally.",
-        });
-      } catch (error) {
-        console.error("Could not save simulated review:", error);
-
-        alert(
-          "Could not save the review decision in browser storage."
-        );
-      }
-
-      return;
-    }
-
-    // -------------------------------------------------
-    // REAL INCIDENTS: SAVE THROUGH SUPABASE RPC
-    // -------------------------------------------------
-
-    setSavingReviewId(dbId);
+    const updatedReview = {
+      review_status: decision,
+      review_reason: reason,
+      status: decision === "CONFIRMED" ? "Confirmed" : "Reported",
+      updated_at: updatedAt,
+    };
 
     try {
-      const { data, error } = await supabase.rpc(
-        "review_incident",
-        {
-          p_incident_id: dbId,
-          p_decision: decision,
-          p_reason: reason,
-        }
+      const savedReviews = JSON.parse(
+        localStorage.getItem(SIMULATED_REVIEWS_KEY) || "{}"
       );
 
-      if (error) throw error;
+      const reviewKey = String(
+        incident.id || incident.reference_no || ""
+      );
 
-      if (!data) {
-        throw new Error(
-          "The review function did not return an incident ID."
-        );
+      if (!reviewKey) {
+        throw new Error("Simulated incident has no valid reference.");
       }
 
-      // Record audit activity only after successful review.
-      await recordSystemActivity({
-        action:
-          decision === "CONFIRMED"
-            ? "CONFIRM_RESCUE_REQUEST"
-            : "REJECT_RESCUE_REQUEST",
-        incident,
-        activity:
-          decision === "CONFIRMED"
-            ? "Confirmed a rescue request"
-            : "Rejected a rescue request",
-        extraDetails: {
-          review_status: decision,
-          review_reason: reason,
-          simulated: false,
-        },
-      });
+      savedReviews[reviewKey] = updatedReview;
+
+      localStorage.setItem(
+        SIMULATED_REVIEWS_KEY,
+        JSON.stringify(savedReviews)
+      );
 
       if (setIncidents) {
         setIncidents((previous) =>
           previous.map((item) =>
-            String(
-              item.dbId || item.databaseId || item.id
-            ) === String(dbId)
-              ? {
-                  ...item,
-                  review_status: decision,
-                  review_reason: reason,
-                  status:
-                    decision === "CONFIRMED"
-                      ? "Confirmed"
-                      : "Reported",
-                  updated_at: new Date().toISOString(),
-                }
+            String(item.id || item.reference_no || "") === reviewKey
+              ? { ...item, ...updatedReview }
               : item
           )
         );
@@ -569,23 +456,145 @@ useEffect(() => {
       setReviewForm(null);
       setReviewReason("");
 
-      alert(
-        decision === "CONFIRMED"
-          ? "Rescue request confirmed. It is now eligible for vehicle dispatch."
-          : "Rescue request rejected. The rejection reason has been recorded."
-      );
+      setReviewNotice({
+        type: "success",
+        title:
+          decision === "CONFIRMED"
+            ? "Simulated Request Confirmed"
+            : "Simulated Request Rejected",
+        message:
+          "This is a simulated incident. Its review was saved locally and was not saved as a real Supabase incident.",
+      });
 
-      if (onRefresh) {
-        await onRefresh();
-      }
     } catch (error) {
-      console.error("Failed to review incident:", error);
-
-      alert(`Could not review incident: ${error.message}`);
-    } finally {
-      setSavingReviewId(null);
+      console.error("Could not save simulated review:", error);
+      alert(`Could not save simulated review: ${error.message}`);
     }
+
+    return;
   }
+
+  // REAL INCIDENTS MUST HAVE A SUPABASE UUID
+  if (!dbId) {
+    alert(
+      "This incident has no valid Supabase ID. Refresh the incident list and try again."
+    );
+    return;
+  }
+
+  setSavingReviewId(dbId);
+
+  try {
+    // STEP 1: SAVE THE REVIEW IN SUPABASE
+    const { data, error } = await supabase.rpc("review_incident", {
+      p_incident_id: dbId,
+      p_decision: decision,
+      p_reason: reason,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (String(data).toLowerCase() !== String(dbId).toLowerCase()) {
+      throw new Error(
+        "Supabase did not return the expected incident ID."
+      );
+    }
+
+    // STEP 2: VERIFY THE ACTUAL DATABASE RECORD
+    const { data: savedIncident, error: verifyError } = await supabase
+      .from("incidents")
+      .select(
+        "id, status, review_status, review_reason, reviewed_by, reviewed_at"
+      )
+      .eq("id", dbId)
+      .single();
+
+    if (verifyError) {
+      throw verifyError;
+    }
+
+    const expectedStatus =
+      decision === "CONFIRMED" ? "Confirmed" : "Reported";
+
+    if (
+      savedIncident.review_status !== decision ||
+      savedIncident.status !== expectedStatus
+    ) {
+      throw new Error(
+        `Review verification failed. Database currently shows review_status=${savedIncident.review_status} and status=${savedIncident.status}.`
+      );
+    }
+
+    // STEP 3: UPDATE THE INTERFACE USING VERIFIED DATABASE VALUES
+    if (setIncidents) {
+      setIncidents((previous) =>
+        previous.map((item) =>
+          String(getDatabaseId(item)).toLowerCase() ===
+          String(dbId).toLowerCase()
+            ? {
+                ...item,
+                review_status: savedIncident.review_status,
+                review_reason: savedIncident.review_reason,
+                status: savedIncident.status,
+                reviewed_by: savedIncident.reviewed_by,
+                reviewed_at: savedIncident.reviewed_at,
+              }
+            : item
+        )
+      );
+    }
+
+    // STEP 4: RECORD AUDIT ACTIVITY
+    await recordSystemActivity({
+      action:
+        decision === "CONFIRMED"
+          ? "CONFIRM_RESCUE_REQUEST"
+          : "REJECT_RESCUE_REQUEST",
+      incident,
+      activity:
+        decision === "CONFIRMED"
+          ? "Confirmed a rescue request"
+          : "Rejected a rescue request",
+      extraDetails: {
+        review_status: decision,
+        review_reason: reason,
+        simulated: false,
+      },
+    });
+
+    setReviewForm(null);
+    setReviewReason("");
+
+    alert(
+      decision === "CONFIRMED"
+        ? "Rescue request successfully confirmed in Supabase. It is now eligible for vehicle dispatch."
+        : "Rescue request successfully rejected in Supabase."
+    );
+
+    if (onRefresh) {
+      await onRefresh();
+    }
+
+  } catch (error) {
+    console.error("Failed to review incident:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    });
+
+    alert(
+      `Could not review incident: ${
+        error?.message || "Unknown Supabase error"
+      }`
+    );
+
+  } finally {
+    setSavingReviewId(null);
+  }
+}
 
   // =====================================================
   // OPEN OUTCOME FORM

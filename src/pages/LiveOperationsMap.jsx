@@ -518,7 +518,6 @@ async function addTestEmergency(sender) {
       address: sender.barangay,
       latitude: sender.lat,
       longitude: sender.lng,
-      priority: "High",
       status: "Reported",
       created_by: session.user.id,
     };
@@ -634,9 +633,6 @@ async function addTestEmergency(sender) {
       longitude: savedIncident.longitude,
       lat: Number(savedIncident.latitude),
       lng: Number(savedIncident.longitude),
-
-      severity: savedIncident.priority,
-      priority: savedIncident.priority,
 
       source: "Simulated Resident Request",
       senderId: sender.id,

@@ -83,11 +83,6 @@ export default function AccountSettings({ onBack }) {
           label: "Incident notifications",
           detail: "Enable notification preferences for reported fire incidents.",
         },
-        {
-          key: "criticalAlerts",
-          label: "Critical incident alerts",
-          detail: "Enable preferences for high-priority fire emergencies.",
-        },
       ],
     },
     {

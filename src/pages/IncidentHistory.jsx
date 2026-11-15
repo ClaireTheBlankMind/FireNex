@@ -20,7 +20,6 @@ export default function IncidentHistory({ incidents = [] }) {
           incident.description,
           incident.barangay,
           incident.status,
-          incident.priority,
           incident.outcome,
           incident.outcome_remarks,
           incident.source,
@@ -112,12 +111,6 @@ export default function IncidentHistory({ incidents = [] }) {
                   </td>
 
                   <td>{incident.barangay || "Not specified"}</td>
-
-                  <td>
-                    <StatusBadge
-                      status={incident.priority || "Medium"}
-                    />
-                  </td>
 
                   <td>
                     {incident.outcome ? (

@@ -62,7 +62,6 @@ function downloadCsv(incidents, units, personnelNames) {
       incident.description || "No description",
       incident.barangay || "",
       incident.location || incident.address || "",
-      incident.priority || "",
       incident.status || "",
       incident.outcome || "",
       incident.outcome_remarks || "",
@@ -235,12 +234,6 @@ export default function ReportsAnalytics({
         !["Resolved", "False Alarm", "Completed", "Cancelled"].includes(
           incident.status
         )
-    ).length;
-
-    const highPriority = reportIncidents.filter(
-      (incident) =>
-        incident.priority === "High" ||
-        incident.priority === "Critical"
     ).length;
 
     const extinguishedByBFP = finalizedIncidents.filter(
@@ -498,11 +491,6 @@ export default function ReportsAnalytics({
             <div>
               <span>Incident records</span>
               <strong>{reportIncidents.length}</strong>
-            </div>
-
-            <div>
-              <span>High/critical priority</span>
-              <strong>{summary.highPriority}</strong>
             </div>
 
             <div>

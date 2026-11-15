@@ -249,10 +249,6 @@ useEffect(() => {
     [incidentList]
   );
 
-  function getPriority(incident) {
-    return "Unverified";
-  }
-
   function getIncidentTitle(incident) {
     return incident?.title || incident?.description || "Untitled incident";
   }
@@ -332,7 +328,6 @@ useEffect(() => {
         incident?.status,
         incident?.review_status,
         incident?.review_reason,
-        incident?.priority,
         incident?.severity,
         incident?.source,
         incident?.description,
@@ -1192,15 +1187,7 @@ async function updateStatus(incident, decision, reason = "") {
                     {/* LOCATION */}
 
                     <td>{getIncidentLocation(incident)}</td>
-
-                    {/* PRIORITY */}
-
-                    <td>
-                      <StatusBadge
-                        status={getPriority(incident)}
-                      />
-                    </td>
-
+                    
                     {/* STATUS / FINAL OUTCOME */}
 
                     <td>

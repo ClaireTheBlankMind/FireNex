@@ -134,7 +134,6 @@ const saveIncidentToSupabase = useCallback(async (incident) => {
       incident.title ||
       "Fire emergency",
     barangay: incident.barangay || null,
-    priority: incident.priority || "Medium",
     status: "Reported",
     reporter_name: incident.reporter_name || null,
     contact_number: incident.contact_number || null,
@@ -310,7 +309,6 @@ const fetchDispatchData = useCallback(async () => {
       assignedUnit: row.assigned_unit_id || "",
       assigned_unit_id: row.assigned_unit_id || null,
       status: row.status || "Reported",
-      priority: row.priority || "Medium",
       reportedAt: row.created_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

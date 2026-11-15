@@ -21,7 +21,6 @@ function downloadCsv(incidents, units, personnelNames) {
     "Incident",
     "Barangay",
     "Location",
-    "Priority",
     "Status",
     "Final Outcome",
     "Verification Remarks",

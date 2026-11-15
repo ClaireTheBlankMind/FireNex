@@ -95,7 +95,6 @@ export default function IncidentHistory({ incidents = [] }) {
               <tr>
                 <th>Incident</th>
                 <th>Barangay</th>
-                <th>Priority</th>
                 <th>Final Outcome</th>
                 <th>Verification Remarks</th>
                 <th>Status</th>

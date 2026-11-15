@@ -1066,13 +1066,6 @@ async function updateStatus(incident, decision, reason = "") {
                     </strong>
                   </div>
 
-                  <div className="review-detail">
-                    <span>Priority</span>
-                    <StatusBadge
-                      status={getPriority(reviewForm.incident)}
-                    />
-                  </div>
-
                   {reviewForm.decision === "CONFIRMED" ? (
                     <div className="review-confirm-notice">
                       You are about to confirm this rescue request.
@@ -1162,7 +1155,6 @@ async function updateStatus(incident, decision, reason = "") {
               <tr>
                 <th>Incident</th>
                 <th>Location</th>
-                <th>Priority</th>
                 <th>Status / Final Outcome</th>
                 <th>Rescue Request</th>
               </tr>

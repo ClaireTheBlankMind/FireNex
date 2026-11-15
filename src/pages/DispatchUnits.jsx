@@ -448,21 +448,10 @@ async function handleDispatch(event) {
       await onRefresh();
     }
   } catch (error) {
-    console.error("Vehicle dispatch failed:", {
-      message: error?.message,
-      details: error?.details,
-      hint: error?.hint,
-      code: error?.code,
-    });
+    console.error("Vehicle dispatch failed:", error);
 
     setActionError(
-      [
-        error?.message || "Could not dispatch the selected vehicle.",
-        error?.details,
-        error?.hint,
-      ]
-        .filter(Boolean)
-        .join(" | ")
+      error.message || "Could not dispatch the selected vehicle."
     );
 
     if (onRefresh) {
@@ -775,12 +764,12 @@ async function handleUnitStatusChange(unit, newStatus) {
           flexWrap: "wrap",
         }}
       >
-        {/* <div>
+        <div>
           <h2 style={styles.heading}>Dispatch &amp; Units</h2>
           <p style={styles.muted}>
             Manage BFP response vehicles and incident assignments.
           </p>
-        </div> */}
+        </div>
 
         <button
           type="button"

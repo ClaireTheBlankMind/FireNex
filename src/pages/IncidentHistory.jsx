@@ -66,30 +66,6 @@ export default function IncidentHistory({ incidents = [] }) {
           icon={CheckCircle2}
           tone="green"
         />
-
-        <StatCard
-          label="Extinguished by Residents"
-          value={outcomeCount("Extinguished by Residents")}
-          detail="Extinguished before BFP arrival"
-          icon={History}
-          tone="blue"
-        />
-
-        <StatCard
-          label="False Alarms"
-          value={outcomeCount("False Alarm")}
-          detail="Verified false alarms"
-          icon={History}
-          tone="orange"
-        />
-
-        <StatCard
-          label="Extinguished by BFP"
-          value={outcomeCount("Fire Extinguished by BFP")}
-          detail="Handled by response personnel"
-          icon={CheckCircle2}
-          tone="green"
-        />
       </div>
 
       <section className="panel">

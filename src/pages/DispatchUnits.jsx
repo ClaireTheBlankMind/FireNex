@@ -448,10 +448,21 @@ async function handleDispatch(event) {
       await onRefresh();
     }
   } catch (error) {
-    console.error("Vehicle dispatch failed:", error);
+    console.error("Vehicle dispatch failed:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+    });
 
     setActionError(
-      error.message || "Could not dispatch the selected vehicle."
+      [
+        error?.message || "Could not dispatch the selected vehicle.",
+        error?.details,
+        error?.hint,
+      ]
+        .filter(Boolean)
+        .join(" | ")
     );
 
     if (onRefresh) {
